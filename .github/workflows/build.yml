@@ -57,26 +57,50 @@ jobs:
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
 
-      # --- 每次推到 main: 刷新固定的 "latest" 滚动发布 (下载链接永不变) ---
-      - name: Remove previous "latest" release
+      # --- 每次推到 main: 版本号自动 +1 (v1.0.1 -> v1.0.2 -> ...) 并发布正式版 ---
+      - name: Compute next version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 取现有所有 release 的 tag, 找出最大的语义化版本, patch +1
+          $tags = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name'
+          $versions = @()
+          foreach ($t in $tags) {
+            $clean = ($t -replace '^v', '').Trim()
+            $v = $null
+            if ([version]::TryParse($clean, [ref]$v)) { $versions += $v }
+          }
+          if ($versions.Count -gt 0) {
+            $max = ($versions | Sort-Object)[-1]
+            $patch = [Math]::Max(0, $max.Build) + 1
+            $next = "v{0}.{1}.{2}" -f $max.Major, $max.Minor, $patch
+          } else {
+            $next = "v1.0.1"
+          }
+          Write-Host "Next version: $next"
+          "version=$next" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Clean up obsolete rolling "latest" release (one-time migration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete latest --yes --cleanup-tag --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
-          Write-Host "Cleanup attempted (ignored if no previous 'latest' release)."
           exit 0
 
-      - name: Publish rolling "latest" release
+      - name: Publish auto-versioned release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: "Latest build (auto)"
-          body: "自动构建的最新版本, 双击即用, 无需安装 Python。每次合并到 main 自动更新。"
-          prerelease: true
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          body: "自动构建版本, 双击即用, 无需安装 Python。`releases/latest` 始终指向本页最新版本。"
           target_commitish: ${{ github.sha }}
+          generate_release_notes: true
           files: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
