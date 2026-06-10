@@ -4,7 +4,7 @@ import subprocess
 import re
 import datetime
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import concurrent.futures
 import time
 import threading
@@ -332,35 +332,119 @@ def scan_folder(folder_path):
     return total_seconds, valid_count, total_files, elapsed
 
 
-if __name__ == "__main__":
+# --- 报告输出 ---
+def print_report(seconds, valid, total, cost_time, title="视频统计分析报告"):
+    final_time = str(datetime.timedelta(seconds=int(seconds)))
+    class_hours = seconds / 2700.0  # 45 分钟 / 课时
+
+    print("\n" + "=" * 80)
+    print(title)
+    print("-" * 80)
+    print(f"执行耗时 : {cost_time:.1f} 秒")
+    print(f"处理进度 : {valid} / {total} 文件")
+    print("-" * 80)
+    print(f"累计时长 : {final_time}")
+    print(f"折算课时 : {class_hours:.1f} 课时 (标准: 45分钟/课时)")
+    print("=" * 80)
+
+
+# --- 运行模式判定 (single / multi) ---
+def is_multi_mode():
+    """决定单目录还是多目录(多U盘)模式。
+    优先级: 环境变量 SCAN_MODE > 可执行文件名是否含 'multi'。
+    这样同一份源码可被 PyInstaller 打成 single / multi 两个 exe。"""
+    env = os.environ.get("SCAN_MODE")
+    if env:
+        return env.strip().lower() == "multi"
+    if getattr(sys, "frozen", False):
+        name = os.path.basename(sys.executable).lower()
+    else:
+        name = os.path.basename(sys.argv[0]).lower()
+    return "multi" in name
+
+
+# --- 文件夹选择 (单目录 / 多目录) ---
+def select_folders(multi=False):
+    root = tk.Tk()
+    root.withdraw()
+    folders = []
+
+    if not multi:
+        f = filedialog.askdirectory(title="选择视频文件夹")
+        if f:
+            folders.append(os.path.abspath(f))
+        root.destroy()
+        return folders
+
+    # 多目录模式: 逐个选择, 直到用户选择不再继续
+    while True:
+        f = filedialog.askdirectory(title=f"选择第 {len(folders) + 1} 个文件夹 / U盘")
+        if f:
+            f = os.path.abspath(f)
+            if f not in folders:
+                folders.append(f)
+            else:
+                messagebox.showinfo("提示", "该目录已添加, 已自动跳过重复项。")
+        more = messagebox.askyesno(
+            "继续添加",
+            f"当前已选 {len(folders)} 个目录。\n是否继续添加下一个 (例如另一个 U盘)?",
+        )
+        if not more:
+            break
+    root.destroy()
+    return folders
+
+
+def main():
     if not os.path.exists(get_ffmpeg_path()):
         print("【错误】核心组件 ffmpeg 缺失。")
         input("按回车键退出...")
         sys.exit()
 
-    root = tk.Tk()
-    root.withdraw()
-    target_folder = filedialog.askdirectory(title="选择视频文件夹")
+    multi = is_multi_mode()
+    print(f"运行模式: {'多目录 (多 U盘汇总)' if multi else '单目录'}")
 
-    if target_folder:
-        target_folder = os.path.abspath(target_folder)
+    folders = select_folders(multi)
+    if not folders:
+        input("\n未选择任何文件夹, 按回车键退出...")
+        return
+
+    grand_seconds = 0.0
+    grand_valid = 0
+    grand_total = 0
+    grand_cost = 0.0
+
+    for folder in folders:
+        if multi:
+            print("\n" + "#" * 80)
+            print(f"开始扫描目录: {folder}")
+            print("#" * 80)
         try:
-            seconds, valid, total, cost_time = scan_folder(target_folder)
+            seconds, valid, total, cost_time = scan_folder(folder)
         except KeyboardInterrupt:
-            print("\n已手动中断。")
+            print("\n已手动中断当前目录。")
             seconds, valid, total, cost_time = 0.0, 0, 0, 0.0
 
-        final_time = str(datetime.timedelta(seconds=int(seconds)))
-        class_hours = seconds / 2700.0  # 45 分钟 / 课时
+        grand_seconds += seconds
+        grand_valid += valid
+        grand_total += total
+        grand_cost += cost_time
 
-        print("\n" + "=" * 80)
-        print(f"视频统计分析报告")
-        print("-" * 80)
-        print(f"执行耗时 : {cost_time:.1f} 秒")
-        print(f"处理进度 : {valid} / {total} 文件")
-        print("-" * 80)
-        print(f"累计时长 : {final_time}")
-        print(f"折算课时 : {class_hours:.1f} 课时 (标准: 45分钟/课时)")
-        print("=" * 80)
+        # 多目录模式下先输出每个目录的小结
+        if multi:
+            print_report(seconds, valid, total, cost_time, title=f"目录统计: {folder}")
+
+    # 汇总报告: 单目录直接出报告; 多目录(>1)再出一份总表
+    if not multi:
+        print_report(grand_seconds, grand_valid, grand_total, grand_cost)
+    elif len(folders) > 1:
+        print_report(
+            grand_seconds, grand_valid, grand_total, grand_cost,
+            title=f"全部 {len(folders)} 个目录汇总",
+        )
 
     input("\n按回车键退出...")
+
+
+if __name__ == "__main__":
+    main()
