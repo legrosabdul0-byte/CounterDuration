@@ -194,17 +194,15 @@ def analyze_metadata(file_info):
     return file_path, header_seconds, "索引读取"
 
 
-# --- 阶段二: 全量深度扫描 (串行, 带实时进度 + 动态超时) ---
-def deep_scan(file_path, ffmpeg_path, timeout):
-    filename = os.path.basename(file_path)
-    cmd_deep = [ffmpeg_path, "-i", file_path, "-c", "copy", "-f", "null", "-"]
+# --- 阶段二辅助: 跑一次 ffmpeg 并实时刷进度, 返回 (stderr文本, 是否超时) ---
+def _run_ffmpeg_capture(cmd, timeout, short_name):
     try:
         proc = subprocess.Popen(
-            cmd_deep, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             bufsize=0, creationflags=_SUBPROCESS_FLAGS,
         )
     except Exception:
-        return 0.0, "未知错误"
+        return "", False
 
     collected = bytearray()
 
@@ -221,7 +219,6 @@ def deep_scan(file_path, ffmpeg_path, timeout):
     t = threading.Thread(target=reader, daemon=True)
     t.start()
 
-    short_name = filename if len(filename) <= 30 else filename[:27] + "..."
     start = time.time()
     timed_out = False
     while True:
@@ -239,19 +236,70 @@ def deep_scan(file_path, ffmpeg_path, timeout):
         time.sleep(0.5)
 
     t.join(timeout=1)
+    return bytes(collected).decode('utf-8', 'ignore'), timed_out
+
+
+def _clear_progress_line():
     with print_lock:
-        print("\r" + " " * 78 + "\r", end="", flush=True)  # 清掉进度行
+        print("\r" + " " * 78 + "\r", end="", flush=True)
 
-    if timed_out:
-        return 0.0, "读取超时"
 
-    output = bytes(collected).decode('utf-8', 'ignore')
+def _extract_duration(output):
     matches = TIME_RE.findall(output)
     if matches:
         final_seconds = parse_ffmpeg_time(matches[-1])
         if final_seconds > 1:
-            return final_seconds, "全量校验"
-    return 0.0, "解析失败"
+            return final_seconds
+    return 0.0
+
+
+def _failure_reason(output):
+    """把 ffmpeg 报错翻译成人话, 让用户知道是坏档而不是工具 bug。"""
+    low = output.lower()
+    if "moov atom not found" in low:
+        return "文件损坏:moov缺失(录制中断)"
+    if "invalid data found" in low:
+        return "文件损坏:数据非法"
+    if "could not find codec parameters" in low:
+        return "无法识别编码"
+    if "error while decoding" in low:
+        return "解码出错:帧损坏"
+    return "解析失败"
+
+
+# --- 阶段二: 全量深度扫描 (串行, 带实时进度 + 动态超时) ---
+def deep_scan(file_path, ffmpeg_path, timeout):
+    filename = os.path.basename(file_path)
+    short_name = filename if len(filename) <= 30 else filename[:27] + "..."
+
+    # 第一遍: 流复制 (快, 不解码), 多数可疑文件够用
+    out1, to1 = _run_ffmpeg_capture(
+        [ffmpeg_path, "-i", file_path, "-c", "copy", "-f", "null", "-"],
+        timeout, short_name,
+    )
+    if to1:
+        _clear_progress_line()
+        return 0.0, "读取超时"
+    dur = _extract_duration(out1)
+    if dur > 0:
+        _clear_progress_line()
+        return dur, "全量校验"
+
+    # 第二遍: 容错全解码 (慢, 但能救回索引损坏 / 时间戳缺失但帧数据尚存的文件)
+    out2, to2 = _run_ffmpeg_capture(
+        [ffmpeg_path, "-err_detect", "ignore_err", "-fflags", "+discardcorrupt",
+         "-i", file_path, "-f", "null", "-"],
+        timeout, short_name,
+    )
+    _clear_progress_line()
+    if to2:
+        return 0.0, "读取超时"
+    dur = _extract_duration(out2)
+    if dur > 0:
+        return dur, "深度解码"
+
+    # 两遍都拿不到时长 -> 文件真的残缺, 给出具体原因
+    return 0.0, _failure_reason(out1 + "\n" + out2)
 
 
 # --- 主流程 ---
