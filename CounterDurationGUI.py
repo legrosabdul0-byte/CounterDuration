@@ -213,10 +213,10 @@ class App(ctk.CTk):
         self.last_seconds = 0.0
 
         self.title("视频时长统计")
-        self.geometry(self.cfg.get("geometry", "860x720"))
-        self.minsize(760, 620)
+        self.geometry(self.cfg.get("geometry", "880x760"))
+        self.minsize(780, 660)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_rowconfigure(5, weight=1)  # 只有日志行随窗口拉伸
 
         # ── 顶栏 ──
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -232,7 +232,7 @@ class App(ctk.CTk):
                               .get(self.cfg.get("theme", "dark"), "深色"))
         self.theme_switch.grid(row=0, column=1, rowspan=2, sticky="e")
 
-        # ── 目录卡片 (可逐项删除) ──
+        # ── 目录卡片 (可逐项删除); 用固定高度容器锁死, 不抢日志空间 ──
         card = ctk.CTkFrame(self, corner_radius=14)
         card.grid(row=1, column=0, sticky="ew", padx=22, pady=8)
         card.grid_columnconfigure(0, weight=1)
@@ -246,13 +246,19 @@ class App(ctk.CTk):
         self.count_var = ctk.StringVar(value="未选择目录")
         ctk.CTkLabel(bar, textvariable=self.count_var,
                      text_color=("gray40", "gray60")).grid(row=0, column=2, sticky="e")
-        self.folder_frame = ctk.CTkScrollableFrame(card, height=86, fg_color=("gray92", "gray17"))
-        self.folder_frame.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
+
+        folder_container = ctk.CTkFrame(card, height=96, fg_color="transparent")
+        folder_container.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
+        folder_container.grid_propagate(False)  # 锁死高度, 防止撑大
+        folder_container.grid_columnconfigure(0, weight=1)
+        folder_container.grid_rowconfigure(0, weight=1)
+        self.folder_frame = ctk.CTkScrollableFrame(folder_container, fg_color=("gray92", "gray17"))
+        self.folder_frame.grid(row=0, column=0, sticky="nsew")
         self.folder_frame.grid_columnconfigure(0, weight=1)
 
-        # ── 操作 + 进度 ──
+        # ── 操作 + 进度 (只放按钮和进度条) ──
         ctrl = ctk.CTkFrame(self, fg_color="transparent")
-        ctrl.grid(row=2, column=0, sticky="ew", padx=22, pady=(2, 2))
+        ctrl.grid(row=2, column=0, sticky="ew", padx=22, pady=(2, 0))
         ctrl.grid_columnconfigure(2, weight=1)
         self.start_btn = ctk.CTkButton(ctrl, text="▶  开始扫描", command=self.on_start,
                                        width=130, height=42,
@@ -264,13 +270,15 @@ class App(ctk.CTk):
         self.progress = ctk.CTkProgressBar(ctrl, height=16, corner_radius=8)
         self.progress.grid(row=0, column=2, sticky="ew", padx=(12, 0))
         self.progress.set(0)
+
+        # ── 状态文字 (独立一行, 不再和按钮重叠) ──
         self.status_var = ctk.StringVar(value="就绪")
         ctk.CTkLabel(self, textvariable=self.status_var, text_color=("gray40", "gray60"),
-                     anchor="w").grid(row=2, column=0, sticky="sw", padx=26, pady=(50, 0))
+                     anchor="w").grid(row=3, column=0, sticky="ew", padx=24, pady=(6, 0))
 
         # ── 统计卡片栏 ──
         stats = ctk.CTkFrame(self, fg_color="transparent")
-        stats.grid(row=3, column=0, sticky="ew", padx=22, pady=(8, 2))
+        stats.grid(row=4, column=0, sticky="ew", padx=22, pady=(8, 2))
         for i in range(4):
             stats.grid_columnconfigure(i, weight=1)
         self.card_total = StatCard(stats, "文件总数", ("gray20", "gray85"))
@@ -280,9 +288,9 @@ class App(ctk.CTk):
         for i, c in enumerate((self.card_total, self.card_ok, self.card_fail, self.card_hours)):
             c.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 8, 0))
 
-        # ── 日志 ──
+        # ── 日志 (唯一随窗口拉伸的区域) ──
         log_wrap = ctk.CTkFrame(self, corner_radius=14)
-        log_wrap.grid(row=4, column=0, sticky="nsew", padx=22, pady=8)
+        log_wrap.grid(row=5, column=0, sticky="nsew", padx=22, pady=8)
         log_wrap.grid_columnconfigure(0, weight=1)
         log_wrap.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(log_wrap, text="实时日志", font=ctk.CTkFont(size=13, weight="bold"),
@@ -296,9 +304,9 @@ class App(ctk.CTk):
                          ("fail", COLOR_FAIL), ("dim", COLOR_DIM)):
             self.log_box._textbox.tag_configure(tag, foreground=col)
 
-        # ── 底部: 汇总 + 导出 ──
+        # ── 底部: 汇总 + 复制 ──
         bottom = ctk.CTkFrame(self, fg_color="transparent")
-        bottom.grid(row=5, column=0, sticky="ew", padx=22, pady=(2, 18))
+        bottom.grid(row=6, column=0, sticky="ew", padx=22, pady=(2, 18))
         bottom.grid_columnconfigure(0, weight=1)
         self.summary = ctk.CTkLabel(
             bottom, text="累计时长  --:--:--      折算课时  --",
