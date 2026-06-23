@@ -31,7 +31,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install PyInstaller
-        run: pip install pyinstaller
+        run: pip install pyinstaller customtkinter
 
       - name: Download ffmpeg (static win64)
         shell: pwsh
@@ -50,7 +50,7 @@ jobs:
         run: pyinstaller --onefile --name CounterDuration-multi --add-binary "ffmpeg.exe;." CounterDuration.py
 
       - name: Build GUI EXE (windowed, no console; ffmpeg.exe bundled)
-        run: pyinstaller --onefile --windowed --name CounterDuration-gui --add-binary "ffmpeg.exe;." CounterDurationGUI.py
+        run: pyinstaller --onefile --windowed --name CounterDuration-gui --collect-all customtkinter --add-binary "ffmpeg.exe;." CounterDurationGUI.py
 
       - name: Upload build artifacts (每个分支 / PR 都可下载的测试 exe)
         uses: actions/upload-artifact@v4
