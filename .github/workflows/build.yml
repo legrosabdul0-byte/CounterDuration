@@ -49,6 +49,9 @@ jobs:
       - name: Build multi-folder EXE (ffmpeg.exe bundled)
         run: pyinstaller --onefile --name CounterDuration-multi --add-binary "ffmpeg.exe;." CounterDuration.py
 
+      - name: Build GUI EXE (windowed, no console; ffmpeg.exe bundled)
+        run: pyinstaller --onefile --windowed --name CounterDuration-gui --add-binary "ffmpeg.exe;." CounterDurationGUI.py
+
       - name: Upload build artifacts (每个分支 / PR 都可下载的测试 exe)
         uses: actions/upload-artifact@v4
         with:
@@ -56,6 +59,7 @@ jobs:
           path: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
+            dist/CounterDuration-gui.exe
 
       # --- 每次推到 main: 版本号自动 +1 (v1.0.1 -> v1.0.2 -> ...) 并发布正式版 ---
       - name: Compute next version
@@ -104,6 +108,33 @@ jobs:
           files: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
+
+      # --- GUI 抢先测试版: 单独的 Beta 预发布 (rolling), 不打扰正式 v1.0.x ---
+      - name: Refresh GUI preview (beta) prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete gui-preview --yes --cleanup-tag --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
+          exit 0
+
+      - name: Publish GUI preview (beta) prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gui-preview
+          name: "图形界面 抢先测试版 (Beta)"
+          body: |
+            🧪 **图形界面抢先测试版** — 双击即用, 无需安装 Python。
+
+            - `CounterDuration-gui.exe`: 窗口版, 有按钮、进度条、实时日志, 无黑框框。
+            - 功能与命令行版一致 (单/多文件夹汇总), 稳定后会并入正式版本。
+            - 欢迎反馈问题! 此为 Beta, 不影响正式版 `v1.0.x`。
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          files: |
+            dist/CounterDuration-gui.exe
 
       # --- 打 v* tag 时: 发布正式版本 Release ---
       - name: Publish tagged Release
