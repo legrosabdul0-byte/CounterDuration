@@ -12,7 +12,6 @@
 
 import os
 import sys
-import csv
 import json
 import queue
 import datetime
@@ -36,7 +35,18 @@ from CounterDuration import (
 )
 
 CLASS_SECONDS = 2700.0  # 45 分钟 / 课时
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".counterduration_gui.json")
+
+
+def _config_path():
+    """配置只放系统标准目录里 (一个文件), 不往用户家目录乱塞。"""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "CounterDuration", "settings.json")
+
+
+CONFIG_PATH = _config_path()
 MONO = "Consolas" if sys.platform == "win32" else "Menlo"
 
 DRIVE_LABELS = {
@@ -65,6 +75,7 @@ def load_config():
 
 def save_config(data):
     try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -294,7 +305,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=18, weight="bold"),
             fg_color=("#e8f0fe", "#1f2a3a"), corner_radius=12, height=54)
         self.summary.grid(row=0, column=0, sticky="ew")
-        self.export_btn = ctk.CTkButton(bottom, text="⬇  导出报告", command=self.export_report,
+        self.export_btn = ctk.CTkButton(bottom, text="📋  复制结果", command=self.copy_results,
                                         width=120, height=44, state="disabled",
                                         fg_color=COLOR_OK, hover_color="#268a5f")
         self.export_btn.grid(row=0, column=1, padx=(10, 0))
@@ -390,41 +401,28 @@ class App(ctk.CTk):
         save_config(self.cfg)
         self.destroy()
 
-    # ---- 导出 ----
-    def export_report(self):
+    # ---- 复制结果到剪贴板 (不落文件) ----
+    def copy_results(self):
         if not self.results:
-            messagebox.showinfo("提示", "还没有可导出的结果。")
-            return
-        path = filedialog.asksaveasfilename(
-            title="导出报告", defaultextension=".csv",
-            initialfile="视频时长报告.csv",
-            filetypes=[("CSV (Excel 可打开)", "*.csv"), ("纯文本", "*.txt")])
-        if not path:
+            messagebox.showinfo("提示", "还没有可复制的结果。")
             return
         hours = self.last_seconds / CLASS_SECONDS
-        try:
-            if path.lower().endswith(".txt"):
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write("视频时长统计报告\n" + "=" * 50 + "\n")
-                    for name, p, secs, status in self.results:
-                        f.write(f"{name}\t{fmt_hms(secs) if secs > 0 else '--:--:--'}\t{status}\n")
-                    f.write("=" * 50 + "\n")
-                    f.write(f"累计时长: {fmt_hms(self.last_seconds)}\n")
-                    f.write(f"折算课时: {hours:.1f} (45分钟/课时)\n")
-                    f.write(f"成功: {self.stat_ok} / {self.stat_total} 文件\n")
-            else:
-                with open(path, "w", encoding="utf-8-sig", newline="") as f:  # BOM -> Excel 中文不乱码
-                    w = csv.writer(f)
-                    w.writerow(["文件名", "时长", "秒数", "状态", "路径"])
-                    for name, p, secs, status in self.results:
-                        w.writerow([name, fmt_hms(secs) if secs > 0 else "", f"{secs:.2f}", status, p])
-                    w.writerow([])
-                    w.writerow(["累计时长", fmt_hms(self.last_seconds)])
-                    w.writerow(["折算课时", f"{hours:.1f}"])
-                    w.writerow(["成功/总数", f"{self.stat_ok}/{self.stat_total}"])
-            messagebox.showinfo("导出成功", f"已保存到:\n{path}")
-        except Exception as e:
-            messagebox.showerror("导出失败", str(e))
+        lines = ["文件名\t时长\t状态"]
+        for name, _p, secs, status in self.results:
+            lines.append(f"{name}\t{fmt_hms(secs) if secs > 0 else '--:--:--'}\t{status}")
+        lines += [
+            "",
+            f"累计时长\t{fmt_hms(self.last_seconds)}",
+            f"折算课时\t{hours:.1f}",
+            f"成功/总数\t{self.stat_ok}/{self.stat_total}",
+        ]
+        text = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()  # 确保剪贴板写入生效
+        self.set_status("结果已复制到剪贴板，可直接粘进 Excel / 记事本 / 聊天框")
+        messagebox.showinfo("已复制",
+                            "结果已复制到剪贴板。\n直接 Ctrl+V 粘到 Excel 会自动分列。")
 
     # ---- 工作线程 -> 入队 -> 主线程执行 ----
     def log(self, text, tag=None):
