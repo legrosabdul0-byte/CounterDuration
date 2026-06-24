@@ -1,5 +1,5 @@
 """
-视频时长统计 - 图形界面 (抢先测试版 / Beta)
+视频时长统计 - 图形界面版
 
 界面用 CustomTkinter (现代深色/浅色主题, 圆角控件, 彩色统计卡片)。
 扫描引擎复用 CounterDuration.py (analyze_metadata / deep_scan 等)。
@@ -224,7 +224,7 @@ class App(ctk.CTk):
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(header, text="🎬  视频时长统计",
                      font=ctk.CTkFont(size=25, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="抢先测试版 Beta", text_color=("#3b7dd8", "#6aa3f0"),
+        ctk.CTkLabel(header, text="本地视频时长 · 课时统计", text_color=("#3b7dd8", "#6aa3f0"),
                      font=ctk.CTkFont(size=12, weight="bold")).grid(row=1, column=0, sticky="w")
         self.theme_switch = ctk.CTkSegmentedButton(
             header, values=["浅色", "深色", "跟随系统"], command=self._on_theme, width=210)
