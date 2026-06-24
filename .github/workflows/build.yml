@@ -31,7 +31,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install PyInstaller
-        run: pip install pyinstaller
+        run: pip install pyinstaller customtkinter
 
       - name: Download ffmpeg (static win64)
         shell: pwsh
@@ -49,6 +49,9 @@ jobs:
       - name: Build multi-folder EXE (ffmpeg.exe bundled)
         run: pyinstaller --onefile --name CounterDuration-multi --add-binary "ffmpeg.exe;." CounterDuration.py
 
+      - name: Build GUI EXE (windowed, no console; ffmpeg.exe bundled)
+        run: pyinstaller --onefile --windowed --name CounterDuration-gui --collect-all customtkinter --add-binary "ffmpeg.exe;." CounterDurationGUI.py
+
       - name: Upload build artifacts (每个分支 / PR 都可下载的测试 exe)
         uses: actions/upload-artifact@v4
         with:
@@ -56,6 +59,7 @@ jobs:
           path: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
+            dist/CounterDuration-gui.exe
 
       # --- 每次推到 main: 版本号自动 +1 (v1.0.1 -> v1.0.2 -> ...) 并发布正式版 ---
       - name: Compute next version
@@ -104,6 +108,17 @@ jobs:
           files: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
+            dist/CounterDuration-gui.exe
+
+      # 清理早期的 GUI Beta 预发布 (已转正, 不再单独发)
+      - name: Clean up obsolete gui-preview prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete gui-preview --yes --cleanup-tag --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
+          exit 0
 
       # --- 打 v* tag 时: 发布正式版本 Release ---
       - name: Publish tagged Release
@@ -113,4 +128,5 @@ jobs:
           files: |
             dist/CounterDuration-single.exe
             dist/CounterDuration-multi.exe
+            dist/CounterDuration-gui.exe
           generate_release_notes: true

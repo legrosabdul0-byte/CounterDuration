@@ -195,7 +195,7 @@ def analyze_metadata(file_info):
 
 
 # --- 阶段二辅助: 跑一次 ffmpeg 并实时刷进度, 返回 (stderr文本, 是否超时) ---
-def _run_ffmpeg_capture(cmd, timeout, short_name):
+def _run_ffmpeg_capture(cmd, timeout, short_name, on_progress=None):
     try:
         proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -231,8 +231,12 @@ def _run_ffmpeg_capture(cmd, timeout, short_name):
         tail = bytes(collected[-4096:]).decode('utf-8', 'ignore')
         progress = TIME_RE.findall(tail)
         if progress:
-            with print_lock:
-                print(f"\r-> 正在精确核对 {short_name} ... 已读到 {progress[-1]}", end="", flush=True)
+            if on_progress is not None:
+                # GUI 等外部消费者: 交给回调, 不碰控制台
+                on_progress(short_name, progress[-1])
+            else:
+                with print_lock:
+                    print(f"\r-> 正在精确核对 {short_name} ... 已读到 {progress[-1]}", end="", flush=True)
         time.sleep(0.5)
 
     t.join(timeout=1)
@@ -268,30 +272,35 @@ def _failure_reason(output):
 
 
 # --- 阶段二: 全量深度扫描 (串行, 带实时进度 + 动态超时) ---
-def deep_scan(file_path, ffmpeg_path, timeout):
+# on_progress(short_name, time_str): 可选回调 (GUI 用); 为 None 时走控制台打印。
+def deep_scan(file_path, ffmpeg_path, timeout, on_progress=None):
     filename = os.path.basename(file_path)
     short_name = filename if len(filename) <= 30 else filename[:27] + "..."
+
+    def _clear():
+        if on_progress is None:
+            _clear_progress_line()
 
     # 第一遍: 流复制 (快, 不解码), 多数可疑文件够用
     out1, to1 = _run_ffmpeg_capture(
         [ffmpeg_path, "-i", file_path, "-c", "copy", "-f", "null", "-"],
-        timeout, short_name,
+        timeout, short_name, on_progress,
     )
     if to1:
-        _clear_progress_line()
+        _clear()
         return 0.0, "读取超时"
     dur = _extract_duration(out1)
     if dur > 0:
-        _clear_progress_line()
+        _clear()
         return dur, "全量校验"
 
     # 第二遍: 容错全解码 (慢, 但能救回索引损坏 / 时间戳缺失但帧数据尚存的文件)
     out2, to2 = _run_ffmpeg_capture(
         [ffmpeg_path, "-err_detect", "ignore_err", "-fflags", "+discardcorrupt",
          "-i", file_path, "-f", "null", "-"],
-        timeout, short_name,
+        timeout, short_name, on_progress,
     )
-    _clear_progress_line()
+    _clear()
     if to2:
         return 0.0, "读取超时"
     dur = _extract_duration(out2)
